@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>PDF Ink</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='2' width='18' height='20' rx='3' fill='%234c8dff'/%3E%3Cpath d='M7 15c2-3 4 1 6-2s3-2 4-1' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+:root{
+  --bg:#1f2126; --panel:#2b2e35; --panel2:#373b44; --text:#e8eaed; --muted:#9aa0a6;
+  --accent:#4c8dff; --border:#41454e; --stage:#3a3d44; --shadow:0 6px 24px rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#e9ebef; --panel:#ffffff; --panel2:#eef0f3; --text:#1f2328; --muted:#646b74;
+    --accent:#2f6fe4; --border:#d5d9df; --stage:#cfd3da; --shadow:0 6px 24px rgba(0,0,0,.15); }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none;
+  -webkit-tap-highlight-color:transparent}
+#app{display:flex;flex-direction:column;height:100%;height:100dvh}
+#topbar{display:flex;align-items:center;gap:4px;padding:6px 10px;padding-top:max(6px,env(safe-area-inset-top));
+  padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));
+  background:var(--panel);border-bottom:1px solid var(--border);overflow-x:auto;flex:none;scrollbar-width:none}
+#topbar::-webkit-scrollbar{display:none}
+.btn{height:42px;min-width:42px;padding:0 10px;border:0;border-radius:10px;background:transparent;color:var(--text);
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;font:inherit;cursor:pointer;flex:none;
+  touch-action:manipulation;white-space:nowrap}
+.btn:hover{background:var(--panel2)}
+.btn:active{transform:scale(.95)}
+.btn.primary{background:var(--accent);color:#fff}
+.btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.btn:disabled{opacity:.35;pointer-events:none}
+.sep{width:1px;height:26px;background:var(--border);flex:none;margin:0 4px}
+.spacer{flex:1;min-width:8px}
+#fileName{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);flex:0 1 auto}
+#pageBox{display:flex;align-items:center;gap:4px;flex:none;color:var(--muted)}
+#pageInput{width:54px;height:36px;text-align:center;border-radius:8px;border:1px solid var(--border);
+  background:var(--panel2);color:var(--text);font:inherit;-webkit-user-select:text;user-select:text}
+#zoomLabel{min-width:62px;font-variant-numeric:tabular-nums}
+.lbl{display:inline}
+@media (max-width:820px){ .lbl{display:none} #fileName{display:none} }
+
+#stage{position:relative;flex:1;min-height:0}
+#viewport{position:absolute;inset:0;overflow:hidden;background:var(--stage);touch-action:none;cursor:crosshair}
+#viewport.hand{cursor:grab}
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
+.page{position:absolute;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35)}
+.page canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+#cursor{position:absolute;border:1.5px solid rgba(0,0,0,.7);box-shadow:0 0 0 1px rgba(255,255,255,.8);border-radius:50%;
+  pointer-events:none;display:none;transform:translate(-50%,-50%)}
+
+#toolbox{position:absolute;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);
+  display:flex;align-items:center;gap:3px;padding:6px;background:var(--panel);border:1px solid var(--border);
+  border-radius:18px;box-shadow:var(--shadow);z-index:5;max-width:calc(100vw - 16px);overflow-x:auto;scrollbar-width:none}
+#toolbox .btn{height:48px;min-width:48px;border-radius:13px}
+.tool.active{background:var(--accent)!important;color:#fff}
+#colorBtn .dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);box-shadow:inset 0 0 0 2px var(--panel)}
+
+#settings{position:absolute;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 74px);transform:translateX(-50%);
+  width:min(380px,calc(100vw - 32px));max-height:calc(100% - 110px);overflow:auto;background:var(--panel);
+  border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:14px 16px;z-index:6}
+#settings[hidden]{display:none}
+.set-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.set-head b{font-size:16px}
+#preview{width:100%;height:70px;background:#fff;border-radius:10px;display:block;margin-bottom:10px}
+.swatches{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px}
+.sw{width:34px;height:34px;border-radius:50%;border:2px solid var(--border);cursor:pointer;padding:0}
+.sw.sel{outline:3px solid var(--accent);outline-offset:2px}
+.sw.custom{position:relative;overflow:hidden;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red)}
+.sw.custom input{position:absolute;inset:-10px;opacity:0;width:60px;height:60px;cursor:pointer}
+.row{display:flex;align-items:center;gap:10px;min-height:44px}
+.row>span{flex:0 0 120px;color:var(--muted)}
+.row input[type=range]{flex:1;min-width:0;height:32px;accent-color:var(--accent)}
+.row output{width:52px;text-align:right;font-variant-numeric:tabular-nums}
+.row.check{justify-content:space-between}
+.row.check span{flex:1}
+.row input[type=checkbox]{width:24px;height:24px;accent-color:var(--accent)}
+hr{border:0;border-top:1px solid var(--border);margin:8px 0}
+.seg{display:flex;background:var(--panel2);border-radius:10px;padding:3px;flex:1}
+.seg button{flex:1;height:36px;border:0;border-radius:8px;background:transparent;color:var(--text);font:inherit;cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff}
+.btnrow{display:flex;gap:8px;margin-top:6px}
+.btnrow .btn{flex:1;background:var(--panel2)}
+.hint{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+  text-align:center;padding:24px;color:var(--muted);z-index:4;background:var(--stage)}
+#empty h1{margin:0;color:var(--text);font-size:24px}
+#empty .btn{height:54px;padding:0 26px;font-size:17px}
+#empty ul{text-align:left;margin:6px 0 0;padding-left:20px;max-width:440px}
+#empty li{margin:4px 0}
+#empty.drag{outline:3px dashed var(--accent);outline-offset:-16px}
+#toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(20,22,26,.92);color:#fff;
+  padding:10px 16px;border-radius:12px;z-index:10;pointer-events:none;opacity:0;transition:opacity .2s;max-width:90vw;text-align:center}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <button class="btn primary" id="openBtn" title="Открыть PDF">
+      <svg viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
+      <span class="lbl">Открыть</span>
+    </button>
+    <span id="fileName"></span>
+    <div class="spacer"></div>
+    <button class="btn" id="prevBtn" title="Предыдущая страница"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div id="pageBox"><input id="pageInput" inputmode="numeric" value="–"><span>/ <span id="pageCount">–</span></span></div>
+    <button class="btn" id="nextBtn" title="Следующая страница"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+    <div class="sep"></div>
+    <button class="btn" id="modeBtn" title="Режим просмотра"></button>
+    <div class="sep"></div>
+    <button class="btn" id="zoomOut" title="Уменьшить"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button class="btn" id="zoomLabel" title="Вписать">100%</button>
+    <button class="btn" id="zoomIn" title="Увеличить"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg></button>
+    <div class="sep"></div>
+    <button class="btn primary" id="exportBtn" title="Сохранить PDF с пометками">
+      <svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+      <span class="lbl">Сохранить PDF</span>
+    </button>
+  </div>
+
+  <div id="stage">
+    <div id="viewport"><div id="world"></div><div id="cursor"></div></div>
+
+    <div id="toolbox">
+      <button class="btn tool" data-tool="hand" title="Рука (H)"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v1"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
+      <button class="btn tool" data-tool="pen" title="Перо (P)"><svg viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg></button>
+      <button class="btn tool" data-tool="highlighter" title="Маркер (M)"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>
+      <button class="btn tool" data-tool="eraser" title="Ластик (E)"><svg viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg></button>
+      <div class="sep"></div>
+      <button class="btn" id="colorBtn" title="Настройки пера"><span class="dot"></span></button>
+      <div class="sep"></div>
+      <button class="btn" id="undoBtn" title="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+      <button class="btn" id="redoBtn" title="Повторить (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+    </div>
+
+    <div id="settings" hidden>
+      <div class="set-head"><b id="setTitle">Перо</b>
+        <button class="btn" id="setClose" title="Закрыть"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <canvas id="preview"></canvas>
+      <div id="inkSet">
+        <div class="swatches" id="swatches"></div>
+        <label class="row"><span>Толщина</span><input type="range" id="sizeR" min="0.5" max="40" step="0.5"><output id="sizeO"></output></label>
+        <label class="row"><span>Непрозрачность</span><input type="range" id="opR" min="0.05" max="1" step="0.05"><output id="opO"></output></label>
+        <label class="row"><span>Нажим стилуса</span><input type="range" id="prR" min="0" max="1" step="0.05"><output id="prO"></output></label>
+      </div>
+      <div id="eraseSet">
+        <label class="row"><span>Размер ластика</span><input type="range" id="erR" min="6" max="80" step="1"><output id="erO"></output></label>
+      </div>
+      <hr>
+      <label class="row"><span>Сглаживание</span><input type="range" id="smR" min="0" max="0.85" step="0.05"><output id="smO"></output></label>
+      <div class="row"><span>Рисовать пальцем</span>
+        <div class="seg" id="fingerSeg"><button data-v="auto">Авто</button><button data-v="on">Да</button><button data-v="off">Нет</button></div></div>
+      <label class="row check"><span>Игнорировать ладонь при работе стилусом</span><input type="checkbox" id="palmC"></label>
+      <div class="btnrow"><button class="btn" id="clearPage">Очистить страницу</button><button class="btn" id="clearAll">Очистить всё</button></div>
+      <p class="hint">«Авто»: пока не замечен стилус, одним пальцем рисуете, а двумя двигаете и масштабируете. Как только коснулись стилусом, рисует только он, а пальцы листают и зумят. Повторное нажатие на активный инструмент открывает эти настройки.</p>
+    </div>
+
+    <div id="empty">
+      <h1>PDF Ink</h1>
+      <div>Простой просмотрщик PDF с рисованием поверх</div>
+      <button class="btn primary" id="emptyOpen">Открыть PDF</button>
+      <div>или перетащите файл сюда</div>
+      <ul>
+        <li>Два пальца: двигать и масштабировать (работает всегда, даже с включённым пером)</li>
+        <li>Стилус рисует с учётом нажима, касания ладони игнорируются</li>
+        <li>Кнопка-ластик на стилусе стирает</li>
+        <li>Пометки автосохраняются в браузере для этого файла</li>
+      </ul>
+    </div>
+    <div id="toast"></div>
+  </div>
+</div>
+<input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+
+<script>
+'use strict';
+/* ====================== setup ====================== */
+const WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const workerReady = (async () => {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
+  try {
+    const r = await fetch(WORKER_URL);
+    if (!r.ok) throw new Error();
+    const t = await r.text();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([t], { type: 'application/javascript' }));
+  } catch (e) { /* pdf.js сам подберёт способ загрузки */ }
+})();
+
+const $ = s => document.querySelector(s);
+const vpEl = $('#viewport'), world = $('#world');
+const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
+const MAX_PX = 12e6, GAP = 20, MIN_S = 0.1, MAX_S = 12;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const now = () => performance.now();
+
+const DEFAULTS = {
+  pen: { color: '#1a56db', size: 2.5, opacity: 1, pressure: 0.6 },
+  highlighter: { color: '#ffd400', size: 14, opacity: 0.35, pressure: 0 },
+  eraser: { size: 24 },
+  smoothing: 0.35, fingerDraw: 'auto', palm: true, stylusSeen: false, tool: 'pen', mode: 'continuous'
+};
+let cfg = (() => {
+  try {
+    const c = JSON.parse(localStorage.getItem('pdfink.cfg') || '{}');
+    return { ...DEFAULTS, ...c, pen: { ...DEFAULTS.pen, ...c.pen }, highlighter: { ...DEFAULTS.highlighter, ...c.highlighter }, eraser: { ...DEFAULTS.eraser, ...c.eraser } };
+  } catch (e) { return structuredClone(DEFAULTS); }
+})();
+function saveCfg() { try { localStorage.setItem('pdfink.cfg', JSON.stringify(cfg)); } catch (e) {} }
+
+const S = {
+  doc: null, bytes: null, name: '', key: '', pages: [],
+  mode: cfg.mode, cur: 0, s: 1, tx: 0, ty: 0, cw: 0, ch: 0,
+  tool: cfg.tool, undo: [], redo: []
+};
+
+let vpRect = vpEl.getBoundingClientRect();
+const vw = () => vpEl.clientWidth, vh = () => vpEl.clientHeight;
+
+function toast(msg, ms = 2200) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ====================== IndexedDB autosave ====================== */
+const idb = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise(res => {
+    try {
+      const r = indexedDB.open('pdfink', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('ann');
+      r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+    } catch (e) { res(null); }
+  }));
+  const tx = async (mode, fn) => {
+    const db = await open(); if (!db) return null;
+    return new Promise(res => {
+      try {
+        const t = db.transaction('ann', mode); const req = fn(t.objectStore('ann'));
+        req.onsuccess = () => res(req.result); req.onerror = () => res(null);
+      } catch (e) { res(null); }
+    });
+  };
+  return { get: k => tx('readonly', s => s.get(k)), put: (k, v) => tx('readwrite', s => s.put(v, k)) };
+})();
+let saveTimer = 0;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    if (!S.doc) return;
+    const data = {};
+    for (const p of S.pages) if (p.strokes.length)
+      data[p.i] = p.strokes.map(st => ({ tool: st.tool, color: st.color, opacity: st.opacity, pts: st.pts.map(v => Math.round(v * 100) / 100) }));
+    idb.put(S.key, data);
+  }, 700);
+}
+
+/* ====================== open / close ====================== */
+async function openFile(file) {
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  await openBytes(new Uint8Array(buf), file.name);
+}
+
+async function openBytes(bytes, name) {
+  toast('Открываю…', 10000);
+  await workerReady;
+  let doc;
+  try { doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise; }
+  catch (e) { toast('Не удалось открыть PDF: ' + (e.message || e), 4000); return; }
+  closeDoc();
+  S.doc = doc; S.bytes = bytes; S.name = name || 'document.pdf'; S.key = S.name + '|' + bytes.length;
+  for (let i = 0; i < doc.numPages; i++) {
+    const page = await doc.getPage(i + 1);
+    const v = page.getViewport({ scale: 1 });
+    const el = document.createElement('div'); el.className = 'page';
+    el.style.width = v.width + 'px'; el.style.height = v.height + 'px';
+    const pdfCanvas = document.createElement('canvas'); const ink = document.createElement('canvas');
+    el.append(pdfCanvas, ink); world.appendChild(el);
+    S.pages.push({ i, page, vp: v, w: v.width, h: v.height, el, pdfCanvas, ink, strokes: [], renderScale: 0, task: null, x: 0, y: 0, shown: true });
+  }
+  const saved = await idb.get(S.key);
+  let restored = 0;
+  if (saved) for (const k in saved) {
+    const p = S.pages[+k]; if (!p) continue;
+    p.strokes = saved[k].map(st => ({ ...st })); restored += p.strokes.length;
+  }
+  $('#empty').hidden = true; $('#empty').style.display = 'none';
+  $('#fileName').textContent = S.name; $('#pageCount').textContent = doc.numPages;
+  document.title = S.name + ' — PDF Ink';
+  S.cur = 0; layout(); fit(); updateUI();
+  toast(restored ? `Восстановлено пометок: ${restored}` : `${doc.numPages} стр.`);
+}
+
+function closeDoc() {
+  if (S.doc) { try { S.doc.destroy(); } catch (e) {} }
+  world.innerHTML = ''; S.pages = []; S.undo = []; S.redo = []; S.doc = null; gesture = null; pointers.clear();
+}
+
+/* ====================== layout & transform ====================== */
+function layout() {
+  if (S.mode === 'continuous') {
+    let maxW = 0; for (const p of S.pages) maxW = Math.max(maxW, p.w);
+    let y = 0;
+    for (const p of S.pages) { p.x = (maxW - p.w) / 2; p.y = y; y += p.h + GAP; p.shown = true; }
+    S.cw = maxW; S.ch = Math.max(0, y - GAP);
+  } else {
+    for (const p of S.pages) { p.shown = p.i === S.cur; p.x = 0; p.y = 0; }
+    const p = S.pages[S.cur]; S.cw = p.w; S.ch = p.h;
+  }
+  for (const p of S.pages) {
+    p.el.style.display = p.shown ? '' : 'none';
+    p.el.style.left = p.x + 'px'; p.el.style.top = p.y + 'px';
+  }
+}
+
+// Свободное перемещение: документ можно увести почти за край,
+// но хотя бы полоска KEEP пикселей остаётся на экране, чтобы его не потерять.
+function clampPan() {
+  const cw = S.cw * S.s, ch = S.ch * S.s, W = vw(), H = vh();
+  const kx = Math.min(120, cw, W / 3), ky = Math.min(120, ch, H / 3);
+  S.tx = clamp(S.tx, kx - cw, W - kx);
+  S.ty = clamp(S.ty, ky - ch, H - ky);
+}
+function centerX() { S.tx = (vw() - S.cw * S.s) / 2; }
+
+function applyTransform() {
+  world.style.transform = `translate(${S.tx}px,${S.ty}px) scale(${S.s})`;
+  $('#zoomLabel').textContent = Math.round(S.s * 75) + '%';
+  if (S.mode === 'continuous' && S.pages.length) {
+    const cy = (vh() * 0.35 - S.ty) / S.s;
+    let cur = S.pages.length - 1;
+    for (const p of S.pages) if (cy < p.y + p.h + GAP / 2) { cur = p.i; break; }
+    if (cur !== S.cur) { S.cur = cur; updatePageUI(); }
+  }
+  onViewChanged();
+}
+
+function zoomAt(sx, sy, ns) {
+  const wx = (sx - S.tx) / S.s, wy = (sy - S.ty) / S.s;
+  S.s = clamp(ns, MIN_S, MAX_S);
+  S.tx = sx - wx * S.s; S.ty = sy - wy * S.s;
+  clampPan(); applyTransform();
+}
+
+function fitPageScale() {
+  const p = S.pages[S.cur]; return p ? clamp(Math.min((vw() - 24) / p.w, (vh() - 24) / p.h), MIN_S, MAX_S) : 1;
+}
+function fit() {
+  if (!S.doc) return;
+  if (S.mode === 'single') {
+    S.s = fitPageScale(); centerX(); S.ty = (vh() - S.ch * S.s) / 2; clampPan();
+  } else {
+    const p = S.pages[S.cur];
+    S.s = clamp(Math.min((vw() - 24) / S.cw, 2.5), MIN_S, MAX_S);
+    centerX(); S.ty = 12 - p.y * S.s; clampPan();
+  }
+  applyTransform();
+}
+
+function goToPage(i) {
+  if (!S.doc) return;
+  i = clamp(i, 0, S.pages.length - 1);
+  if (S.mode === 'single') {
+    const zoomed = S.s > fitPageScale() * 1.05;
+    S.cur = i; layout();
+    if (zoomed) { S.ty = 60; clampPan(); applyTransform(); } else fit();
+  } else {
+    S.cur = i; S.ty = 12 - S.pages[i].y * S.s; clampPan(); applyTransform();
+    S.cur = i;
+  }
+  updatePageUI();
+}
+
+function setMode(m) {
+  S.mode = cfg.mode = m; saveCfg();
+  const cur = S.cur;
+  if (S.doc) { layout(); S.cur = cur; fit(); }
+  updateUI();
+}
+
+/* ====================== rendering ====================== */
+function targetScale(p) {
+  return Math.max(0.1, Math.min(S.s * DPR(), Math.sqrt(MAX_PX / (p.w * p.h))));
+}
+function pagesInView(margin) {
+  const W = vw(), H = vh();
+  const l = (-S.tx - margin * W) / S.s, r = (W - S.tx + margin * W) / S.s;
+  const t = (-S.ty - margin * H) / S.s, b = (H - S.ty + margin * H) / S.s;
+  return S.pages.filter(p => p.shown && p.x + p.w >= l && p.x <= r && p.y + p.h >= t && p.y <= b);
+}
+let missTimer = 0, qTimer = 0;
+function onViewChanged() {
+  if (!missTimer) missTimer = setTimeout(() => { missTimer = 0; renderVisible(true); }, 90);
+  clearTimeout(qTimer); qTimer = setTimeout(() => renderVisible(false), 220);
+}
+function releasePage(p) {
+  if (p.task) { try { p.task.cancel(); } catch (e) {} p.task = null; }
+  p.pdfCanvas.width = p.pdfCanvas.height = 0; p.ink.width = p.ink.height = 0; p.renderScale = 0;
+}
+async function renderVisible(onlyMissing) {
+  if (!S.doc) return;
+  if (!onlyMissing) {
+    const keep = new Set(pagesInView(2));
+    for (const p of S.pages) if (p.renderScale && !keep.has(p) && !(gesture && gesture.page === p)) releasePage(p);
+  }
+  const cx = (vw() / 2 - S.tx) / S.s, cy = (vh() / 2 - S.ty) / S.s;
+  const vis = pagesInView(0.6).sort((a, b) =>
+    Math.hypot(a.x + a.w / 2 - cx, a.y + a.h / 2 - cy) - Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy));
+  for (const p of vis) {
+    if (onlyMissing && (p.renderScale || p.task)) continue;
+    const t = targetScale(p);
+    if (!p.renderScale || Math.abs(p.renderScale - t) / t > 0.08) await renderPage(p, t);
+  }
+}
+async function renderPage(p, sc) {
+  if (p.task) {
+    if (Math.abs(p.taskScale - sc) / sc < 0.08) return;
+    try { p.task.cancel(); } catch (e) {}
+  }
+  const v = p.page.getViewport({ scale: sc });
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(v.width); c.height = Math.ceil(v.height);
+  const task = p.page.render({ canvasContext: c.getContext('2d', { alpha: false }), viewport: v });
+  p.task = task; p.taskScale = sc;
+  try { await task.promise; } catch (e) { if (p.task === task) p.task = null; return; }
+  if (p.task !== task) return;
+  p.task = null;
+  p.el.replaceChild(c, p.pdfCanvas);
+  p.pdfCanvas.width = p.pdfCanvas.height = 0;
+  p.pdfCanvas = c; p.renderScale = sc;
+  p.ink.width = c.width; p.ink.height = c.height;
+  redrawInk(p);
+}
+
+/* ====================== strokes geometry ====================== */
+// Штрих = объединение кругов в точках + трапеций между ними; все подконтуры
+// одной ориентации, поэтому nonzero-заливка даёт честное объединение без «двойной» прозрачности.
+function quadPath(ctx, x0, y0, r0, x1, y1, r1) {
+  const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+  if (len < 1e-4) return;
+  const nx = -dy / len, ny = dx / len;
+  ctx.moveTo(x0 + nx * r0, y0 + ny * r0);
+  ctx.lineTo(x0 - nx * r0, y0 - ny * r0);
+  ctx.lineTo(x1 - nx * r1, y1 - ny * r1);
+  ctx.lineTo(x1 + nx * r1, y1 + ny * r1);
+  ctx.closePath();
+}
+function strokePath(ctx, pts, from = 0) {
+  const n = pts.length / 3;
+  for (let i = Math.max(0, from); i < n; i++) {
+    const x = pts[3 * i], y = pts[3 * i + 1], r = pts[3 * i + 2];
+    ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (i > 0) quadPath(ctx, pts[3 * i - 3], pts[3 * i - 2], pts[3 * i - 1], x, y, r);
+  }
+}
+function redrawInk(p) {
+  if (!p.renderScale) return;
+  const ctx = p.ink.getContext('2d'), sc = p.renderScale;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, p.ink.width, p.ink.height);
+  ctx.setTransform(sc, 0, 0, sc, 0, 0);
+  for (const st of p.strokes) drawStroke(ctx, st);
+  ctx.globalAlpha = 1;
+}
+function drawStroke(ctx, st) {
+  ctx.globalAlpha = st.opacity; ctx.fillStyle = st.color;
+  ctx.beginPath(); strokePath(ctx, st.pts); ctx.fill('nonzero');
+}
+function radiusFor(t, pressure, isPen) {
+  const base = t.size / 2;
+  if (!isPen || !t.pressure) return base;
+  const k = t.pressure, p = clamp(pressure, 0, 1);
+  return base * Math.max(0.08, (1 - k) + k * 2 * p);
+}
+function bbox(st) {
+  if (st.bb) return st.bb;
+  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+  for (let i = 0; i < st.pts.length; i += 3) {
+    const r = st.pts[i + 2];
+    a = Math.min(a, st.pts[i] - r); b = Math.min(b, st.pts[i + 1] - r);
+    c = Math.max(c, st.pts[i] + r); d = Math.max(d, st.pts[i + 1] + r);
+  }
+  return (st.bb = [a, b, c, d]);
+}
+function segDist(px, py, x0, y0, x1, y1) {
+  const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
+  const t = l2 ? clamp(((px - x0) * dx + (py - y0) * dy) / l2, 0, 1) : 0;
+  return Math.hypot(px - x0 - t * dx, py - y0 - t * dy);
+}
+function strokeHit(st, x, y, R) {
+  const bb = bbox(st);
+  if (x < bb[0] - R || x > bb[2] + R || y < bb[1] - R || y > bb[3] + R) return false;
+  const p = st.pts, n = p.length / 3;
+  if (n === 1) return Math.hypot(x - p[0], y - p[1]) <= R + p[2];
+  for (let i = 1; i < n; i++)
+    if (segDist(x, y, p[3 * i - 3], p[3 * i - 2], p[3 * i], p[3 * i + 1]) <= R + Math.max(p[3 * i - 1], p[3 * i + 2])) return true;
+  return false;
+}
+
+/* ====================== input ====================== */
+const pointers = new Map(); // активные касания пальцев
+let gesture = null;
+let penDown = false, lastPen = -1e9, touchStartView = null, spaceDown = false;
+const live = document.createElement('canvas'); live.style.pointerEvents = 'none';
+let liveCtx = null, liveDrawn = 0, liveRaf = 0;
+
+function local(e) { return { x: e.clientX - vpRect.left, y: e.clientY - vpRect.top }; }
+function toWorld(pt) { return { x: (pt.x - S.tx) / S.s, y: (pt.y - S.ty) / S.s }; }
+function pageAt(w, tol = 0) {
+  for (const p of S.pages)
+    if (p.shown && w.x >= p.x - tol && w.x <= p.x + p.w + tol && w.y >= p.y - tol && w.y <= p.y + p.h + tol) return p;
+  return null;
+}
+function fingerDraws() { return cfg.fingerDraw === 'on' || (cfg.fingerDraw === 'auto' && !cfg.stylusSeen); }
+function capture(e) { try { vpEl.setPointerCapture(e.pointerId); } catch (er) {} }
+
+function startPan(id, pt, ptype) {
+  gesture = { type: 'pan', ptype, id, sx: pt.x, sy: pt.y, tx0: S.tx, ty0: S.ty, t0: now(), samples: [[now(), pt.x, pt.y]] };
+}
+function startPinch() {
+  const [a, b] = [...pointers.entries()];
+  const d0 = Math.hypot(a[1].x - b[1].x, a[1].y - b[1].y) || 1;
+  gesture = { type: 'pinch', ptype: 'touch', ids: [a[0], b[0]], d0,
+    m0: { x: (a[1].x + b[1].x) / 2, y: (a[1].y + b[1].y) / 2 }, s0: S.s, tx0: S.tx, ty0: S.ty };
+}
+function startInk(e) {
+  const w = toWorld(local(e));
+  const isEraser = S.tool === 'eraser' || (e.pointerType === 'pen' && (e.buttons & 32));
+  if (isEraser) {
+    gesture = { type: 'erase', ptype: e.pointerType, id: e.pointerId, removed: [] };
+    eraseAt(e); return true;
+  }
+  const p = pageAt(w);
+  if (!p) return false;
+  const t = cfg[S.tool];
+  const st = { tool: S.tool, color: t.color, opacity: t.opacity, pts: [] };
+  gesture = { type: 'ink', ptype: e.pointerType, id: e.pointerId, page: p, stroke: st, t0: now(),
+    isPen: e.pointerType === 'pen', sm: null, tcfg: t };
+  const sc = p.renderScale || targetScale(p);
+  live.width = Math.ceil(p.w * sc); live.height = Math.ceil(p.h * sc);
+  live.style.opacity = st.opacity; live._sc = sc;
+  p.el.appendChild(live);
+  liveCtx = live.getContext('2d'); liveDrawn = 0;
+  addInkPoint(e);
+  requestLive();
+  return true;
+}
+function addInkPoint(ev, final) {
+  const g = gesture, p = g.page, w = toWorld(local(ev));
+  const px = w.x - p.x, py = w.y - p.y;
+  let pr = g.isPen ? ev.pressure : 0.5;
+  if (g.isPen && !(pr > 0)) pr = g.sm ? g.sm.p : 0.3;
+  const a = final ? 0 : cfg.smoothing;
+  if (!g.sm) g.sm = { x: px, y: py, p: pr };
+  else { g.sm.x += (px - g.sm.x) * (1 - a); g.sm.y += (py - g.sm.y) * (1 - a); g.sm.p += (pr - g.sm.p) * 0.6; }
+  const pts = g.stroke.pts, n = pts.length;
+  if (n && Math.hypot(g.sm.x - pts[n - 3], g.sm.y - pts[n - 2]) < 0.35 / S.s && !final) return;
+  pts.push(g.sm.x, g.sm.y, radiusFor(g.tcfg, g.sm.p, g.isPen));
+}
+function requestLive() {
+  if (liveRaf) return;
+  liveRaf = requestAnimationFrame(() => {
+    liveRaf = 0;
+    if (!gesture || gesture.type !== 'ink') return;
+    const pts = gesture.stroke.pts, n = pts.length / 3;
+    if (liveDrawn >= n) return;
+    const sc = live._sc;
+    liveCtx.setTransform(sc, 0, 0, sc, 0, 0);
+    liveCtx.fillStyle = gesture.stroke.color;
+    liveCtx.beginPath(); strokePath(liveCtx, pts, liveDrawn); liveCtx.fill('nonzero');
+    liveDrawn = n;
+  });
+}
+function clearLive() {
+  if (liveRaf) { cancelAnimationFrame(liveRaf); liveRaf = 0; }
+  live.width = live.height = 0; live.remove();
+}
+function endInk() {
+  const g = gesture; gesture = null; clearLive();
+  if (!g || !g.stroke.pts.length) return;
+  const p = g.page; p.strokes.push(g.stroke);
+  if (p.renderScale) {
+    const ctx = p.ink.getContext('2d'); ctx.setTransform(p.renderScale, 0, 0, p.renderScale, 0, 0);
+    drawStroke(ctx, g.stroke); ctx.globalAlpha = 1;
+  }
+  pushAction({ type: 'add', page: p, stroke: g.stroke });
+}
+function cancelInk() { gesture = null; clearLive(); }
+
+function eraseAt(e) {
+  const w = toWorld(local(e));
+  const p = pageAt(w, 30 / S.s); if (!p) return;
+  const x = w.x - p.x, y = w.y - p.y, R = cfg.eraser.size / 2 / S.s;
+  let changed = false;
+  for (let k = p.strokes.length - 1; k >= 0; k--) {
+    if (strokeHit(p.strokes[k], x, y, R)) {
+      gesture.removed.push({ page: p, stroke: p.strokes[k], index: k });
+      p.strokes.splice(k, 1); changed = true;
+    }
+  }
+  if (changed) redrawInk(p);
+}
+function endErase() {
+  const g = gesture; gesture = null;
+  if (g && g.removed.length) pushAction({ type: 'erase', items: g.removed });
+}
+
+function updatePan(pt) {
+  const g = gesture;
+  S.tx = g.tx0 + pt.x - g.sx; S.ty = g.ty0 + pt.y - g.sy;
+  clampPan(); applyTransform();
+  const t = now(); g.samples.push([t, pt.x, pt.y]);
+  while (g.samples.length > 2 && t - g.samples[0][0] > 100) g.samples.shift();
+}
+function endPan(pt) {
+  const g = gesture; gesture = null;
+  const dx = pt.x - g.sx, dy = pt.y - g.sy, dt = now() - g.t0;
+  if (S.mode === 'single' && S.s <= fitPageScale() * 1.05 && Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy) && dt < 700) {
+    goToPage(S.cur + (dx < 0 ? 1 : -1)); return;
+  }
+  const a = g.samples[0], b = g.samples[g.samples.length - 1];
+  if (b && a && b[0] - a[0] > 10 && now() - b[0] < 60) {
+    const vx = (b[1] - a[1]) / (b[0] - a[0]), vy = (b[2] - a[2]) / (b[0] - a[0]);
+    if (Math.hypot(vx, vy) > 0.25) startInertia(vx, vy);
+  }
+}
+let inertiaRaf = 0;
+function startInertia(vx, vy) {
+  cancelInertia(); let last = now();
+  const step = t => {
+    const dt = Math.min(40, t - last); last = t;
+    S.tx += vx * dt; S.ty += vy * dt;
+    const d = Math.pow(0.996, dt); vx *= d; vy *= d;
+    clampPan(); applyTransform();
+    inertiaRaf = Math.hypot(vx, vy) > 0.03 ? requestAnimationFrame(step) : 0;
+  };
+  inertiaRaf = requestAnimationFrame(step);
+}
+function cancelInertia() { if (inertiaRaf) cancelAnimationFrame(inertiaRaf); inertiaRaf = 0; }
+
+function onDown(e) {
+  if (!S.doc) return;
+  hideSettings(); cancelInertia();
+  const t = e.pointerType, pt = local(e);
+  if (t === 'pen') {
+    e.preventDefault();
+    if (!cfg.stylusSeen) { cfg.stylusSeen = true; saveCfg(); }
+    penDown = true; lastPen = now();
+    // ладонь коснулась раньше пера — откатываем то, что она успела сдвинуть
+    if (pointers.size && cfg.palm) {
+      if (gesture && gesture.ptype === 'touch') {
+        if (gesture.type === 'ink') cancelInk();
+        else if (gesture.type === 'erase') endErase();
+        gesture = null;
+      }
+      if (touchStartView) { S.s = touchStartView.s; S.tx = touchStartView.tx; S.ty = touchStartView.ty; clampPan(); applyTransform(); }
+      pointers.clear();
+    }
+    if (gesture) return;
+    capture(e);
+    if (S.tool === 'hand' || !startInk(e)) startPan(e.pointerId, pt, t);
+    return;
+  }
+  if (t === 'touch') {
+    if (cfg.palm && (penDown || now() - lastPen < 500)) return;
+    if (gesture && gesture.ptype !== 'touch') return;
+    if (!pointers.size) touchStartView = { s: S.s, tx: S.tx, ty: S.ty };
+    pointers.set(e.pointerId, pt); capture(e);
+    if (pointers.size === 1) {
+      if (S.tool === 'hand' || !fingerDraws() || !startInk(e)) startPan(e.pointerId, pt, t);
+    } else if (pointers.size === 2) {
+      if (gesture && gesture.type === 'ink') { if (now() - gesture.t0 < 350) cancelInk(); else endInk(); }
+      else if (gesture && gesture.type === 'erase') endErase();
+      startPinch();
+    }
+    return;
+  }
+  // мышь
+  if (gesture) return;
+  capture(e);
+  if (e.button === 1 || e.button === 2 || spaceDown || S.tool === 'hand') { e.preventDefault(); startPan(e.pointerId, pt, t); }
+  else if (e.button === 0) { if (!startInk(e)) startPan(e.pointerId, pt, t); }
+}
+
+function onMove(e) {
+  const t = e.pointerType;
+  if (t === 'pen') lastPen = now();
+  updateCursor(e);
+  if (t === 'touch' && pointers.has(e.pointerId)) pointers.set(e.pointerId, local(e));
+  const g = gesture; if (!g) return;
+  if (g.type === 'ink' && e.pointerId === g.id) {
+    let evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    if (!evs || !evs.length) evs = [e];
+    for (const ev of evs) addInkPoint(ev);
+    requestLive();
+  } else if (g.type === 'erase' && e.pointerId === g.id) {
+    eraseAt(e);
+  } else if (g.type === 'pan' && e.pointerId === g.id) {
+    updatePan(local(e));
+  } else if (g.type === 'pinch' && g.ids.includes(e.pointerId)) {
+    const a = pointers.get(g.ids[0]), b = pointers.get(g.ids[1]); if (!a || !b) return;
+    const d = Math.hypot(a.x - b.x, a.y - b.y), m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const wx = (g.m0.x - g.tx0) / g.s0, wy = (g.m0.y - g.ty0) / g.s0;
+    S.s = clamp(g.s0 * d / g.d0, MIN_S, MAX_S);
+    S.tx = m.x - wx * S.s; S.ty = m.y - wy * S.s;
+    clampPan(); applyTransform();
+  }
+}
+
+function onUp(e) {
+  const t = e.pointerType;
+  if (t === 'pen') { penDown = false; lastPen = now(); }
+  const wasTouch = t === 'touch' && pointers.delete(e.pointerId);
+  const g = gesture; if (!g) return;
+  if (g.type === 'ink' && g.id === e.pointerId) { if (e.type !== 'pointercancel') addInkPoint(e, true); endInk(); }
+  else if (g.type === 'erase' && g.id === e.pointerId) endErase();
+  else if (g.type === 'pan' && g.id === e.pointerId) endPan(local(e));
+  else if (g.type === 'pinch' && wasTouch) {
+    if (pointers.size >= 2) startPinch();
+    else if (pointers.size === 1) { const [id, pt] = [...pointers.entries()][0]; startPan(id, pt, 'touch'); gesture.noSwipe = true; gesture.samples = []; }
+    else gesture = null;
+  }
+}
+
+vpEl.addEventListener('pointerdown', onDown);
+vpEl.addEventListener('pointermove', onMove);
+vpEl.addEventListener('pointerup', onUp);
+vpEl.addEventListener('pointercancel', onUp);
+vpEl.addEventListener('pointerleave', () => { $('#cursor').style.display = 'none'; });
+vpEl.addEventListener('contextmenu', e => e.preventDefault());
+// iOS: не даём системе зумить страницу и вызывать лупу
+vpEl.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+vpEl.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('gesturechange', e => e.preventDefault());
+
+vpEl.addEventListener('wheel', e => {
+  if (!S.doc) return;
+  e.preventDefault(); cancelInertia();
+  const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? vh() : 1;
+  if (e.ctrlKey || e.metaKey) {
+    const pt = local(e); zoomAt(pt.x, pt.y, S.s * Math.exp(-e.deltaY * k * 0.0025 * (e.ctrlKey && Math.abs(e.deltaY) < 50 ? 4 : 1)));
+  } else {
+    const dx = e.shiftKey ? e.deltaY : e.deltaX, dy = e.shiftKey ? 0 : e.deltaY;
+    if (S.mode === 'single' && S.s <= fitPageScale() * 1.05 && Math.abs(dy) > 0) {
+      const t = now(); if (t - (vpEl._wt || 0) > 350 && Math.abs(dy * k) > 20) { vpEl._wt = t; goToPage(S.cur + (dy > 0 ? 1 : -1)); }
+      return;
+    }
+    S.tx -= dx * k; S.ty -= dy * k; clampPan(); applyTransform();
+  }
+}, { passive: false });
+
+function updateCursor(e) {
+  const c = $('#cursor');
+  if (S.tool !== 'eraser' || e.pointerType === 'touch' || !S.doc) { c.style.display = 'none'; return; }
+  const pt = local(e), d = cfg.eraser.size;
+  c.style.display = 'block'; c.style.width = c.style.height = d + 'px';
+  c.style.left = pt.x + 'px'; c.style.top = pt.y + 'px';
+}
+
+/* ====================== undo / redo ====================== */
+function pushAction(a) { S.undo.push(a); S.redo = []; afterChange(); }
+function afterChange() { updateUndoUI(); scheduleSave(); }
+function applyAction(a, reverse) {
+  const touched = new Set();
+  if (a.type === 'add') {
+    if (reverse) { const i = a.page.strokes.indexOf(a.stroke); if (i >= 0) a.page.strokes.splice(i, 1); }
+    else a.page.strokes.push(a.stroke);
+    touched.add(a.page);
+  } else if (a.type === 'erase') {
+    if (reverse) for (let k = a.items.length - 1; k >= 0; k--) { const it = a.items[k]; it.page.strokes.splice(it.index, 0, it.stroke); touched.add(it.page); }
+    else for (const it of a.items) { const i = it.page.strokes.indexOf(it.stroke); if (i >= 0) it.page.strokes.splice(i, 1); touched.add(it.page); }
+  }
+  touched.forEach(redrawInk);
+}
+function undo() { if (gesture || !S.undo.length) return; const a = S.undo.pop(); applyAction(a, true); S.redo.push(a); afterChange(); }
+function redo() { if (gesture || !S.redo.length) return; const a = S.redo.pop(); applyAction(a, false); S.undo.push(a); afterChange(); }
+function clearPages(list) {
+  const items = [];
+  for (const p of list) for (let k = p.strokes.length - 1; k >= 0; k--) items.push({ page: p, stroke: p.strokes[k], index: k });
+  if (!items.length) return;
+  applyAction({ type: 'erase', items }, false);
+  pushAction({ type: 'erase', items });
+}
+
+/* ====================== export ====================== */
+function hexToRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return PDFLib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+function strokeToSvg(st, vp) {
+  const src = st.pts, n = src.length / 3, P = [];
+  for (let i = 0; i < n; i++) {
+    const x = src[3 * i], y = src[3 * i + 1], r = src[3 * i + 2];
+    if (P.length && i < n - 1) {
+      const q = P[P.length - 1];
+      if (Math.hypot(x - q[0], y - q[1]) < Math.max(0.3, r * 0.3)) continue;
+    }
+    P.push([x, y, r]);
+  }
+  const f = v => (Math.round(v * 100) / 100).toString();
+  const T = (x, y) => { const [X, Y] = vp.convertToPdfPoint(x, y); return f(X) + ' ' + f(-Y); };
+  const out = [];
+  const poly = arr => out.push('M' + arr.map(a => T(a[0], a[1])).join('L') + 'Z');
+  for (let i = 0; i < P.length; i++) {
+    const [x, y, r] = P[i];
+    let needCircle = i === 0 || i === P.length - 1;
+    if (!needCircle) {
+      const a = P[i - 1], b = P[i + 1];
+      const a1 = Math.atan2(y - a[1], x - a[0]), a2 = Math.atan2(b[1] - y, b[0] - x);
+      let d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d;
+      needCircle = d > 0.06 || Math.abs(r - a[2]) > 0.05 * r;
+    }
+    if (needCircle) {
+      const k = clamp(Math.round(r * 3), 10, 32), c = [];
+      for (let j = 0; j < k; j++) { const t = 2 * Math.PI * j / k; c.push([x + r * Math.cos(t), y + r * Math.sin(t)]); }
+      poly(c);
+    }
+    if (i > 0) {
+      const [x0, y0, r0] = P[i - 1], dx = x - x0, dy = y - y0, len = Math.hypot(dx, dy);
+      if (len > 1e-4) {
+        const nx = -dy / len, ny = dx / len;
+        poly([[x0 + nx * r0, y0 + ny * r0], [x0 - nx * r0, y0 - ny * r0], [x - nx * r, y - ny * r], [x + nx * r, y + ny * r]]);
+      }
+    }
+  }
+  return out.join('');
+}
+async function buildPdf() {
+  const pdf = await PDFLib.PDFDocument.load(S.bytes, { ignoreEncryption: true });
+  const pages = pdf.getPages();
+  for (const p of S.pages) {
+    if (!p.strokes.length) continue;
+    const page = pages[p.i];
+    for (const st of p.strokes) {
+      page.drawSvgPath(strokeToSvg(st, p.vp), { x: 0, y: 0, color: hexToRgb(st.color), opacity: st.opacity, borderWidth: 0 });
+    }
+  }
+  return pdf.save();
+}
+async function exportPdf() {
+  if (!S.doc) return;
+  toast('Готовлю PDF…', 20000);
+  try {
+    const out = await buildPdf();
+    const name = S.name.replace(/\.pdf$/i, '') + '_annotated.pdf';
+    const blob = new Blob([out], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast('Сохранено: ' + name);
+  } catch (e) {
+    console.error(e); toast('Ошибка экспорта: ' + (e.message || e), 5000);
+  }
+}
+
+/* ====================== UI ====================== */
+const ICON_SINGLE = '<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/></svg><span class="lbl">Постранично</span>';
+const ICON_CONT = '<svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="9" rx="1.5"/><rect x="5" y="13" width="14" height="9" rx="1.5"/></svg><span class="lbl">Лента</span>';
+const COLORS = ['#111111', '#1a56db', '#e02424', '#0e9f6e', '#ff8a00', '#9333ea', '#ffd400', '#ec4899', '#06b6d4', '#ffffff'];
+
+function updatePageUI() {
+  $('#pageInput').value = S.doc ? S.cur + 1 : '–';
+  $('#prevBtn').disabled = !S.doc || S.cur <= 0;
+  $('#nextBtn').disabled = !S.doc || S.cur >= S.pages.length - 1;
+}
+function updateUndoUI() {
+  $('#undoBtn').disabled = !S.undo.length; $('#redoBtn').disabled = !S.redo.length;
+}
+function updateToolUI() {
+  document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === S.tool));
+  vpEl.classList.toggle('hand', S.tool === 'hand');
+  const t = S.tool === 'highlighter' ? cfg.highlighter : cfg.pen;
+  $('#colorBtn .dot').style.background = S.tool === 'eraser' ? 'transparent' : t.color;
+}
+function updateUI() {
+  $('#modeBtn').innerHTML = S.mode === 'single' ? ICON_SINGLE : ICON_CONT;
+  $('#modeBtn').title = S.mode === 'single' ? 'Сейчас: постранично. Нажмите для ленты' : 'Сейчас: лента. Нажмите для постраничного';
+  ['#exportBtn', '#zoomIn', '#zoomOut', '#zoomLabel', '#modeBtn'].forEach(s => $(s).disabled = !S.doc);
+  updatePageUI(); updateUndoUI(); updateToolUI();
+}
+function setTool(t) {
+  if (S.tool === t && t !== 'hand') { toggleSettings(); return; }
+  S.tool = cfg.tool = t; saveCfg(); updateToolUI();
+  if (t !== 'eraser') $('#cursor').style.display = 'none';
+  if (!$('#settings').hidden) fillSettings();
+}
+
+function settingsTool() { return S.tool === 'hand' ? 'pen' : S.tool; }
+function fillSettings() {
+  const tool = settingsTool();
+  $('#setTitle').textContent = { pen: 'Перо', highlighter: 'Маркер', eraser: 'Ластик' }[tool];
+  $('#inkSet').style.display = tool === 'eraser' ? 'none' : '';
+  $('#eraseSet').style.display = tool === 'eraser' ? '' : 'none';
+  if (tool !== 'eraser') {
+    const t = cfg[tool];
+    const sw = $('#swatches'); sw.innerHTML = '';
+    for (const c of COLORS) {
+      const b = document.createElement('button'); b.className = 'sw' + (c === t.color ? ' sel' : ''); b.style.background = c;
+      b.onclick = () => { t.color = c; changed(); };
+      sw.appendChild(b);
+    }
+    const cu = document.createElement('label'); cu.className = 'sw custom' + (COLORS.includes(t.color) ? '' : ' sel');
+    cu.title = 'Свой цвет';
+    const inp = document.createElement('input'); inp.type = 'color'; inp.value = t.color;
+    inp.oninput = () => { t.color = inp.value; saveCfg(); updateToolUI(); drawPreview(); };
+    inp.onchange = changed; cu.appendChild(inp); sw.appendChild(cu);
+    $('#sizeR').value = t.size; $('#sizeO').textContent = t.size + ' pt';
+    $('#opR').value = t.opacity; $('#opO').textContent = Math.round(t.opacity * 100) + '%';
+    $('#prR').value = t.pressure; $('#prO').textContent = Math.round(t.pressure * 100) + '%';
+  }
+  $('#erR').value = cfg.eraser.size; $('#erO').textContent = cfg.eraser.size + ' px';
+  $('#smR').value = cfg.smoothing; $('#smO').textContent = Math.round(cfg.smoothing * 100) + '%';
+  document.querySelectorAll('#fingerSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === cfg.fingerDraw));
+  $('#palmC').checked = cfg.palm;
+  drawPreview();
+}
+function changed() { saveCfg(); updateToolUI(); fillSettings(); }
+function drawPreview() {
+  const c = $('#preview'), w = c.clientWidth, h = c.clientHeight, d = DPR();
+  if (!w) return;
+  c.width = w * d; c.height = h * d;
+  const ctx = c.getContext('2d'); ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, w, h);
+  const tool = settingsTool();
+  if (tool === 'eraser') {
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(w / 2, h / 2, cfg.eraser.size / 2, 0, 7); ctx.stroke(); return;
+  }
+  const t = cfg[tool], pts = [], k = 1.4;
+  for (let i = 0; i <= 120; i++) {
+    const u = i / 120;
+    pts.push(24 + u * (w - 48), h / 2 + Math.sin(u * Math.PI * 2) * h * 0.22, radiusFor(t, Math.sin(u * Math.PI) * 0.95 + 0.05, true) * k);
+  }
+  drawStroke(ctx, { color: t.color, opacity: t.opacity, pts }); ctx.globalAlpha = 1;
+}
+function toggleSettings() { $('#settings').hidden ? showSettings() : hideSettings(); }
+function showSettings() { $('#settings').hidden = false; fillSettings(); }
+function hideSettings() { $('#settings').hidden = true; }
+
+const bindRange = (id, fn) => $(id).addEventListener('input', e => { fn(+e.target.value); saveCfg(); fillSettings(); updateToolUI(); });
+bindRange('#sizeR', v => cfg[settingsTool()].size = v);
+bindRange('#opR', v => cfg[settingsTool()].opacity = v);
+bindRange('#prR', v => cfg[settingsTool()].pressure = v);
+bindRange('#erR', v => cfg.eraser.size = v);
+bindRange('#smR', v => cfg.smoothing = v);
+document.querySelectorAll('#fingerSeg button').forEach(b => b.onclick = () => { cfg.fingerDraw = b.dataset.v; changed(); });
+$('#palmC').onchange = e => { cfg.palm = e.target.checked; saveCfg(); };
+$('#clearPage').onclick = () => { if (S.doc && confirm(`Стереть все пометки на странице ${S.cur + 1}?`)) clearPages([S.pages[S.cur]]); };
+$('#clearAll').onclick = () => { if (S.doc && confirm('Стереть все пометки во всём документе?')) clearPages(S.pages); };
+$('#setClose').onclick = hideSettings;
+$('#colorBtn').onclick = toggleSettings;
+
+document.querySelectorAll('.tool').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+$('#undoBtn').onclick = undo; $('#redoBtn').onclick = redo;
+$('#openBtn').onclick = $('#emptyOpen').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = e => { openFile(e.target.files[0]); e.target.value = ''; };
+$('#prevBtn').onclick = () => goToPage(S.cur - 1);
+$('#nextBtn').onclick = () => goToPage(S.cur + 1);
+$('#pageInput').onchange = e => { const v = parseInt(e.target.value, 10); if (v) goToPage(v - 1); else updatePageUI(); e.target.blur(); };
+$('#pageInput').onfocus = e => e.target.select();
+$('#modeBtn').onclick = () => setMode(S.mode === 'single' ? 'continuous' : 'single');
+$('#zoomIn').onclick = () => zoomAt(vw() / 2, vh() / 2, S.s * 1.25);
+$('#zoomOut').onclick = () => zoomAt(vw() / 2, vh() / 2, S.s / 1.25);
+$('#zoomLabel').onclick = fit;
+$('#exportBtn').onclick = exportPdf;
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
+  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+  if (mod && (k === 'z' || k === 'я')) { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if (mod && (k === 'y' || k === 'н')) { e.preventDefault(); redo(); }
+  else if (mod && (k === 's' || k === 'ы')) { e.preventDefault(); exportPdf(); }
+  else if (mod && (k === 'o' || k === 'щ')) { e.preventDefault(); $('#fileInput').click(); }
+  else if (mod && (k === '=' || k === '+')) { e.preventDefault(); $('#zoomIn').click(); }
+  else if (mod && k === '-') { e.preventDefault(); $('#zoomOut').click(); }
+  else if (mod && k === '0') { e.preventDefault(); fit(); }
+  else if (mod) return;
+  else if (k === ' ') { spaceDown = true; e.preventDefault(); }
+  else if (k === 'arrowright' || k === 'pagedown') goToPage(S.cur + 1);
+  else if (k === 'arrowleft' || k === 'pageup') goToPage(S.cur - 1);
+  else if (k === 'h' || k === 'р') setTool('hand');
+  else if (k === 'p' || k === 'з') setTool('pen');
+  else if (k === 'm' || k === 'ь') setTool('highlighter');
+  else if (k === 'e' || k === 'у') setTool('eraser');
+  else if (k === 'escape') hideSettings();
+});
+window.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; });
+
+// перетаскивание файла
+const empty = $('#empty');
+window.addEventListener('dragover', e => { e.preventDefault(); empty.classList.add('drag'); });
+window.addEventListener('dragleave', () => empty.classList.remove('drag'));
+window.addEventListener('drop', e => {
+  e.preventDefault(); empty.classList.remove('drag');
+  const f = [...(e.dataTransfer.files || [])].find(f => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
+  if (f) openFile(f);
+});
+
+// изменение размеров / поворот планшета — сохраняем точку в центре
+let lastSize = [vw(), vh()];
+new ResizeObserver(() => {
+  const [ow, oh] = lastSize; lastSize = [vw(), vh()];
+  vpRect = vpEl.getBoundingClientRect();
+  if (!S.doc) return;
+  const wx = (ow / 2 - S.tx) / S.s, wy = (oh / 2 - S.ty) / S.s;
+  S.tx = vw() / 2 - wx * S.s; S.ty = vh() / 2 - wy * S.s;
+  clampPan(); applyTransform();
+}).observe(vpEl);
+window.addEventListener('scroll', () => { vpRect = vpEl.getBoundingClientRect(); });
+
+updateUI();
+window.__pdfink = { S, openBytes, buildPdf, cfg }; // для отладки
+</script>
+</body>
+</html>
