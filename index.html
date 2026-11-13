@@ -197,7 +197,7 @@ const workerReady = (async () => {
 const $ = s => document.querySelector(s);
 const vpEl = $('#viewport'), world = $('#world');
 const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
-const MAX_PX = 12e6, GAP = 20, MIN_S = 0.1, MAX_S = 12;
+const MAX_PX = 8e6, GAP = 20, MIN_S = 0.1, MAX_S = 12;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const now = () => performance.now();
 
@@ -283,6 +283,7 @@ async function openBytes(bytes, name) {
     const el = document.createElement('div'); el.className = 'page';
     el.style.width = v.width + 'px'; el.style.height = v.height + 'px';
     const pdfCanvas = document.createElement('canvas'); const ink = document.createElement('canvas');
+    freeCanvas(pdfCanvas); freeCanvas(ink); // по умолчанию canvas 300×150 — это лишняя память на каждой странице
     el.append(pdfCanvas, ink); world.appendChild(el);
     S.pages.push({ i, page, vp: v, w: v.width, h: v.height, el, pdfCanvas, ink, strokes: [], renderScale: 0, task: null, x: 0, y: 0, shown: true });
   }
@@ -301,6 +302,7 @@ async function openBytes(bytes, name) {
 
 function closeDoc() {
   if (S.doc) { try { S.doc.destroy(); } catch (e) {} }
+  for (const p of S.pages) releasePage(p);
   world.innerHTML = ''; S.pages = []; S.undo = []; S.redo = []; S.doc = null; gesture = null; pointers.clear();
 }
 
@@ -387,9 +389,14 @@ function setMode(m) {
 }
 
 /* ====================== rendering ====================== */
+// Планшетные браузеры (особенно Safari на iPad) имеют общий лимит памяти на все canvas.
+// При превышении холсты молча перестают рисоваться — становятся чёрными/пустыми.
+// Поэтому держим суммарную площадь всех холстов в пределах бюджета.
+const BUDGET_PX = 28e6;
 function targetScale(p) {
   return Math.max(0.1, Math.min(S.s * DPR(), Math.sqrt(MAX_PX / (p.w * p.h))));
 }
+function freeCanvas(c) { if (c) { c.width = 0; c.height = 0; } }
 function pagesInView(margin) {
   const W = vw(), H = vh();
   const l = (-S.tx - margin * W) / S.s, r = (W - S.tx + margin * W) / S.s;
@@ -403,20 +410,28 @@ function onViewChanged() {
 }
 function releasePage(p) {
   if (p.task) { try { p.task.cancel(); } catch (e) {} p.task = null; }
-  p.pdfCanvas.width = p.pdfCanvas.height = 0; p.ink.width = p.ink.height = 0; p.renderScale = 0;
+  freeCanvas(p.pdfCanvas); freeCanvas(p.ink); p.renderScale = 0;
+}
+// Масштабы рендера для видимых страниц с учётом общего бюджета памяти
+function budgetScales(vis) {
+  let area = 0;
+  const t = vis.map(p => { const s = targetScale(p); area += p.w * p.h * s * s * (p.strokes.length ? 2 : 1); return s; });
+  const k = area > BUDGET_PX ? Math.sqrt(BUDGET_PX / area) : 1;
+  return t.map(s => Math.max(0.1, s * k));
 }
 async function renderVisible(onlyMissing) {
   if (!S.doc) return;
-  if (!onlyMissing) {
-    const keep = new Set(pagesInView(2));
-    for (const p of S.pages) if (p.renderScale && !keep.has(p) && !(gesture && gesture.page === p)) releasePage(p);
-  }
   const cx = (vw() / 2 - S.tx) / S.s, cy = (vh() / 2 - S.ty) / S.s;
-  const vis = pagesInView(0.6).sort((a, b) =>
+  const vis = pagesInView(0.25).sort((a, b) =>
     Math.hypot(a.x + a.w / 2 - cx, a.y + a.h / 2 - cy) - Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy));
-  for (const p of vis) {
+  // сначала освобождаем всё, что далеко от экрана, — до выделения новых холстов
+  const keep = new Set(onlyMissing ? pagesInView(1) : vis);
+  for (const p of S.pages)
+    if ((p.renderScale || p.task) && !keep.has(p) && !(gesture && gesture.page === p)) releasePage(p);
+  const scales = budgetScales(vis);
+  for (let i = 0; i < vis.length; i++) {
+    const p = vis[i], t = scales[i];
     if (onlyMissing && (p.renderScale || p.task)) continue;
-    const t = targetScale(p);
     if (!p.renderScale || Math.abs(p.renderScale - t) / t > 0.08) await renderPage(p, t);
   }
 }
@@ -427,16 +442,18 @@ async function renderPage(p, sc) {
   }
   const v = p.page.getViewport({ scale: sc });
   const c = document.createElement('canvas');
+  c.className = 'pdf';
   c.width = Math.ceil(v.width); c.height = Math.ceil(v.height);
-  const task = p.page.render({ canvasContext: c.getContext('2d', { alpha: false }), viewport: v });
+  const ctx = c.getContext('2d');
+  if (!ctx) { freeCanvas(c); return; }
+  const task = p.page.render({ canvasContext: ctx, viewport: v });
   p.task = task; p.taskScale = sc;
-  try { await task.promise; } catch (e) { if (p.task === task) p.task = null; return; }
-  if (p.task !== task) return;
+  try { await task.promise; } catch (e) { if (p.task === task) p.task = null; freeCanvas(c); return; }
+  if (p.task !== task) { freeCanvas(c); return; }
   p.task = null;
   p.el.replaceChild(c, p.pdfCanvas);
-  p.pdfCanvas.width = p.pdfCanvas.height = 0;
+  freeCanvas(p.pdfCanvas);
   p.pdfCanvas = c; p.renderScale = sc;
-  p.ink.width = c.width; p.ink.height = c.height;
   redrawInk(p);
 }
 
@@ -461,9 +478,13 @@ function strokePath(ctx, pts, from = 0) {
     if (i > 0) quadPath(ctx, pts[3 * i - 3], pts[3 * i - 2], pts[3 * i - 1], x, y, r);
   }
 }
+// Слой рисунка занимает память только на страницах, где есть пометки
 function redrawInk(p) {
-  if (!p.renderScale) return;
-  const ctx = p.ink.getContext('2d'), sc = p.renderScale;
+  if (!p.renderScale || !p.strokes.length) { freeCanvas(p.ink); return; }
+  const sc = p.renderScale, W = Math.ceil(p.w * sc), H = Math.ceil(p.h * sc);
+  if (p.ink.width !== W || p.ink.height !== H) { p.ink.width = W; p.ink.height = H; }
+  const ctx = p.ink.getContext('2d');
+  if (!ctx) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, p.ink.width, p.ink.height);
   ctx.setTransform(sc, 0, 0, sc, 0, 0);
   for (const st of p.strokes) drawStroke(ctx, st);
@@ -586,10 +607,10 @@ function endInk() {
   const g = gesture; gesture = null; clearLive();
   if (!g || !g.stroke.pts.length) return;
   const p = g.page; p.strokes.push(g.stroke);
-  if (p.renderScale) {
+  if (p.renderScale && p.ink.width) {
     const ctx = p.ink.getContext('2d'); ctx.setTransform(p.renderScale, 0, 0, p.renderScale, 0, 0);
     drawStroke(ctx, g.stroke); ctx.globalAlpha = 1;
-  }
+  } else redrawInk(p);
   pushAction({ type: 'add', page: p, stroke: g.stroke });
 }
 function cancelInk() { gesture = null; clearLive(); }
