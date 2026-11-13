@@ -578,9 +578,18 @@ function addInkPoint(ev, final) {
   const px = w.x - p.x, py = w.y - p.y;
   let pr = g.isPen ? ev.pressure : 0.5;
   if (g.isPen && !(pr > 0)) pr = g.sm ? g.sm.p : 0.3;
-  const a = final ? 0 : cfg.smoothing;
+  // Стабилизатор «на нитке»: точка линии тянется за пером на нитке длины R
+  // (в пикселях экрана). Не зависит от частоты событий стилуса, поэтому
+  // дрожание руки гасится одинаково на любом устройстве.
+  const R = cfg.smoothing * 16 / S.s;
   if (!g.sm) g.sm = { x: px, y: py, p: pr };
-  else { g.sm.x += (px - g.sm.x) * (1 - a); g.sm.y += (py - g.sm.y) * (1 - a); g.sm.p += (pr - g.sm.p) * 0.6; }
+  else {
+    g.sm.p += (pr - g.sm.p) * 0.5;
+    const dx = px - g.sm.x, dy = py - g.sm.y, d = Math.hypot(dx, dy);
+    if (final) { g.sm.x = px; g.sm.y = py; }          // в конце дотягиваем до острия
+    else if (d > R) { const k = (d - R) / d; g.sm.x += dx * k; g.sm.y += dy * k; }
+    else return;                                       // перо внутри нитки — линия стоит
+  }
   const pts = g.stroke.pts, n = pts.length;
   if (n && Math.hypot(g.sm.x - pts[n - 3], g.sm.y - pts[n - 2]) < 0.35 / S.s && !final) return;
   pts.push(g.sm.x, g.sm.y, radiusFor(g.tcfg, g.sm.p, g.isPen));
